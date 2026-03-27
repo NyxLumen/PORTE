@@ -4,14 +4,14 @@ import { useState, useRef, useEffect, useCallback } from "react"
 import { Upload, Link as LinkIcon, Sparkles, ChevronLeft, ChevronRight, Menu, X } from "lucide-react"
 
 const CARDS = [
-  { id: 1, x: 0,  y: 6,  w: 220, aspect: "3/4", depth: 0.28, rotate: -4 },
-  { id: 2, x: 74, y: 4,  w: 205, aspect: "3/4", depth: 0.42, rotate:  3 },
-  { id: 3, x: 14, y: 52, w: 200, aspect: "3/5", depth: 0.35, rotate: -2 },
-  { id: 4, x: 80, y: 44, w: 215, aspect: "3/4", depth: 0.52, rotate:  5 },
-  { id: 5, x: 38, y: -4, w: 195, aspect: "4/5", depth: 0.32, rotate: -3 },
-  { id: 6, x: 60, y: 60, w: 210, aspect: "3/4", depth: 0.46, rotate:  2 },
-  { id: 7, x: 4,  y: 66, w: 190, aspect: "4/5", depth: 0.22, rotate: -5 },
-  { id: 8, x: 84, y: 10, w: 200, aspect: "3/4", depth: 0.40, rotate:  4 },
+  { id: 1, src: "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/card-1-MIvcqxLWTkh6RCn1gQrNJijMp7plrX.jpg",  x: 0,  y: 6,  w: 260, depth: 0.28, rotate: -4 },
+  { id: 2, src: "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/card-2-N3sLtnmCe2n9tRpzQGSsE24QAyHulh.jpg",  x: 74, y: 4,  w: 245, depth: 0.42, rotate:  3 },
+  { id: 3, src: "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/card-3-pDI4FFJN0uwFafNJj27THTI0fJNkKI.jpg",  x: 14, y: 52, w: 380, depth: 0.35, rotate: -2 },
+  { id: 4, src: "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/card-4.jpg-UMmPrhhqr17h8ivwEdottzSYIor7NN.png", x: 80, y: 44, w: 255, depth: 0.52, rotate:  5 },
+  { id: 5, src: "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/card-5-ORMKj3QpxHPETv6mBNRNdaGzxPXLbu.jpg",  x: 38, y: -4, w: 235, depth: 0.32, rotate: -3 },
+  { id: 6, src: "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/card-6-MDiHyfkPHmdG09sZwPPwM05ZH9cTQD.jpg",  x: 60, y: 60, w: 250, depth: 0.46, rotate:  2 },
+  { id: 7, src: "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/card-7.jpg-Xuyeoa0Z4ccQ9bzNt5ScdS1lHJI7vD.avif", x: 4,  y: 66, w: 230, depth: 0.22, rotate: -5 },
+  { id: 8, src: "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/card-8.jpg-3A32rfG06r7oTeRcY4LFU2S33RkBLz.avif", x: 84, y: 10, w: 240, depth: 0.40, rotate:  4 },
 ]
 
 const FITS = Array.from({ length: 8 }, (_, i) => ({ id: i + 1 }))
@@ -23,10 +23,15 @@ function lerp(a: number, b: number, t: number) {
 export default function PortePage() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [hoveredCard, setHoveredCard] = useState<number | null>(null)
+  const [mounted, setMounted] = useState(false)
   const heroRef = useRef<HTMLDivElement>(null)
   const mouseRef = useRef({ x: 0, y: 0 })
   const posRef = useRef(CARDS.map(() => ({ x: 0, y: 0 })))
   const [positions, setPositions] = useState(CARDS.map(() => ({ x: 0, y: 0 })))
+
+  useEffect(() => {
+    setMounted(true)
+  }, [])
 
   const scrollTo = useCallback((id: string) => {
     const el = document.getElementById(id)
@@ -125,22 +130,25 @@ export default function PortePage() {
         {CARDS.map((card, i) => (
           <div
             key={card.id}
-            className="absolute bg-zinc-900 border border-zinc-700"
+            className="absolute overflow-hidden"
             onMouseEnter={() => setHoveredCard(card.id)}
             onMouseLeave={() => setHoveredCard(null)}
             style={{
               left: `${card.x}%`,
               top: `${card.y}%`,
               width: card.w,
-              aspectRatio: card.aspect,
-              transform: `translate(${positions[i].x}px, ${positions[i].y}px) rotate(${card.rotate}deg) scale(${hoveredCard === card.id ? 1.5 : 1})`,
-              transition: hoveredCard === card.id ? "transform 0.1s ease" : "transform 0.1s ease",
+              transform: mounted 
+                ? `translate(${positions[i].x}px, ${positions[i].y}px) rotate(${card.rotate}deg) scale(${hoveredCard === card.id ? 1.5 : 1})`
+                : `translate(0px, 0px) rotate(${card.rotate}deg) scale(1)`,
+              transition: "transform 0.1s ease",
               zIndex: 20,
             }}
           >
-            <div className="w-full h-full bg-zinc-900 flex items-end justify-start p-2">
-              <span className="text-zinc-700 text-xs font-mono">{String(card.id).padStart(2, "0")}</span>
-            </div>
+            <img
+              src={card.src}
+              alt=""
+              className="w-full h-auto block"
+            />
           </div>
         ))}
 
