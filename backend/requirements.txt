@@ -4,3 +4,4 @@ python-dotenv>=1.0.1
 python-multipart>=0.0.9
 uvicorn>=0.30.1
 pydantic>=2.7.4
+beautifulsoup4>=4.12.0

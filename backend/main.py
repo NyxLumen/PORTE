@@ -7,10 +7,20 @@ from fastapi import FastAPI, HTTPException, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
+from scraper import scrape_clothing_image
 
 load_dotenv()
 
 app = FastAPI()
+
+def resolve_url(url: str) -> str:
+    """Helper to determine if a URL is a generic web page that needs its image scraped"""
+    exts = ['.jpg', '.jpeg', '.png', '.webp', '.gif']
+    # If the URL doesn't look like a direct image link or belongs to a common image host
+    if not any(ext in url.lower() for ext in exts) and "tmpfiles" not in url.lower():
+        scraped = scrape_clothing_image(url)
+        return scraped if scraped else url
+    return url
 
 app.add_middleware(
     CORSMiddleware,
@@ -45,6 +55,10 @@ class TryOnRequest(BaseModel):
 
 @app.post("/api/try-on")
 async def generate_tryon(request: TryOnRequest):
+    # Intercept and scrape URLs if they are e-commerce pages Instead of direct images
+    request.user_image_url = resolve_url(request.user_image_url)
+    request.garment_image_url = resolve_url(request.garment_image_url)
+
     # Unique key for these two images
     cache_key = hashlib.md5(f"{request.user_image_url}{request.garment_image_url}".encode()).hexdigest()
     
