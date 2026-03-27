@@ -1,7 +1,7 @@
 "use client"
 // PORTE – v4
 import { useState, useRef, useEffect, useCallback } from "react"
-import { Upload, Link as LinkIcon, Sparkles, ChevronLeft, ChevronRight, Menu, X } from "lucide-react"
+import { ChevronLeft, ChevronRight, Menu, X, Plus } from "lucide-react"
 
 const CARDS = [
   { id: 1, src: "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/card-1-MIvcqxLWTkh6RCn1gQrNJijMp7plrX.jpg",  x: 0,  y: 6,  w: 260, depth: 0.28, rotate: -4 },
@@ -171,61 +171,89 @@ export default function PortePage() {
       {/* Engine */}
       <section
         id="engine"
-        className="py-24 px-6 lg:px-8 border-t border-zinc-800"
+        className="py-32 px-6 lg:px-8 border-t border-zinc-800"
         style={{ backgroundColor: "#000" }}
       >
-        <div className="max-w-7xl mx-auto">
-          <div className="mb-12">
-            <span className="text-xs text-zinc-600 tracking-widest uppercase mb-4 block">02</span>
-            <h2 className="font-serif text-5xl sm:text-6xl lg:text-7xl tracking-tighter">The Engine</h2>
-            <p className="text-zinc-500 mt-4 max-w-lg text-sm sm:text-base">
-              Upload your photo. Paste a garment URL. Let it synthesize your new look.
-            </p>
+        <div className="max-w-5xl mx-auto">
+
+          <div className="mb-20">
+            <span className="text-[10px] text-zinc-700 tracking-[0.4em] uppercase block mb-5">02 — Fitting Room</span>
+            <h2 className="font-serif text-6xl sm:text-7xl lg:text-8xl tracking-tighter leading-none">The Engine</h2>
           </div>
 
-          <div className="grid lg:grid-cols-2 gap-8 lg:gap-12">
-            <div className="border border-zinc-800 p-8 relative">
-              <div className="absolute top-4 left-4 w-4 h-4 border-l border-t border-zinc-700" />
-              <div className="absolute top-4 right-4 w-4 h-4 border-r border-t border-zinc-700" />
-              <div className="absolute bottom-4 left-4 w-4 h-4 border-l border-b border-zinc-700" />
-              <div className="absolute bottom-4 right-4 w-4 h-4 border-r border-b border-zinc-700" />
-              <div className="h-64 flex flex-col items-center justify-center text-center cursor-pointer hover:bg-zinc-900 transition-colors">
-                <Upload className="w-8 h-8 text-zinc-600 mb-4" />
-                <p className="text-zinc-400 text-sm mb-1">Drop your photo here</p>
-                <p className="text-zinc-600 text-xs">or click to browse</p>
-              </div>
-            </div>
+          <div className="grid grid-cols-2 gap-px bg-zinc-800">
 
-            <div className="flex flex-col gap-6">
-              <div className="border border-zinc-800 p-4">
-                <label className="text-xs text-zinc-600 tracking-widest uppercase mb-2 block">Garment URL</label>
-                <div className="flex items-center gap-3">
-                  <LinkIcon className="w-4 h-4 text-zinc-600 shrink-0" />
-                  <input
-                    type="url"
-                    placeholder="https://brand.com/product/..."
-                    className="flex-1 bg-transparent text-zinc-50 text-sm placeholder:text-zinc-700 outline-none"
-                  />
+            {/* Left Mirror — Your Silhouette */}
+            <div
+              className="relative flex flex-col bg-black cursor-pointer group"
+              style={{ aspectRatio: "3/4" }}
+            >
+              <div className="absolute inset-0 border border-zinc-800 pointer-events-none" />
+
+              {/* Label top-left */}
+              <div className="absolute top-6 left-6">
+                <span className="text-[9px] text-zinc-700 tracking-[0.35em] uppercase">Your Silhouette</span>
+              </div>
+
+              {/* Center content */}
+              <div className="flex-1 flex flex-col items-center justify-center gap-5">
+                <div className="w-11 h-11 border border-zinc-800 flex items-center justify-center group-hover:border-zinc-600 transition-colors duration-300">
+                  <Plus className="w-4 h-4 text-zinc-600 group-hover:text-zinc-400 transition-colors duration-300" strokeWidth={1} />
                 </div>
+                <span className="text-[10px] text-zinc-600 tracking-[0.3em] uppercase group-hover:text-zinc-500 transition-colors duration-300">
+                  Upload Stance
+                </span>
               </div>
 
-              <div className="border border-zinc-800 flex-1 min-h-52 flex items-center justify-center relative overflow-hidden">
-                <div
-                  className="absolute inset-0 opacity-5"
-                  style={{
-                    backgroundImage:
-                      "repeating-linear-gradient(0deg, transparent, transparent 2px, #fff 2px, #fff 4px)",
-                  }}
+              {/* Corner markers */}
+              <div className="absolute top-3 left-3 w-3 h-3 border-t border-l border-zinc-800" />
+              <div className="absolute top-3 right-3 w-3 h-3 border-t border-r border-zinc-800" />
+              <div className="absolute bottom-3 left-3 w-3 h-3 border-b border-l border-zinc-800" />
+              <div className="absolute bottom-3 right-3 w-3 h-3 border-b border-r border-zinc-800" />
+            </div>
+
+            {/* Right Mirror — The Garment */}
+            <div
+              className="relative flex flex-col bg-black"
+              style={{ aspectRatio: "3/4" }}
+            >
+              <div className="absolute inset-0 border border-zinc-800 pointer-events-none" />
+
+              {/* Label top-left */}
+              <div className="absolute top-6 left-6 right-6">
+                <span className="text-[9px] text-zinc-700 tracking-[0.35em] uppercase">The Garment</span>
+              </div>
+
+              {/* URL input — razor thin, sits near top */}
+              <div className="mt-16 mx-6 border-b border-zinc-800 pb-3">
+                <input
+                  type="url"
+                  placeholder="— paste garment url"
+                  className="w-full bg-transparent text-zinc-300 text-xs tracking-widest placeholder:text-zinc-700 outline-none font-light"
+                  style={{ letterSpacing: "0.15em" }}
                 />
-                <p className="text-zinc-700 text-xs tracking-widest uppercase relative">Neural Output</p>
               </div>
 
-              <button className="w-full py-4 bg-zinc-50 text-zinc-950 font-medium tracking-tight hover:bg-zinc-200 transition-colors flex items-center justify-center gap-2">
-                <Sparkles className="w-4 h-4" />
-                Synthesize
-              </button>
+              {/* Moody void below input */}
+              <div className="flex-1 flex flex-col items-center justify-center gap-3" style={{ backgroundColor: "rgba(9,9,11,0.5)" }}>
+                <div className="w-8 h-px bg-zinc-800" />
+                <span className="text-[9px] text-zinc-800 tracking-[0.4em] uppercase">Awaiting Product</span>
+                <div className="w-8 h-px bg-zinc-800" />
+              </div>
+
+              {/* Corner markers */}
+              <div className="absolute top-3 left-3 w-3 h-3 border-t border-l border-zinc-800" />
+              <div className="absolute top-3 right-3 w-3 h-3 border-t border-r border-zinc-800" />
+              <div className="absolute bottom-3 left-3 w-3 h-3 border-b border-l border-zinc-800" />
+              <div className="absolute bottom-3 right-3 w-3 h-3 border-b border-r border-zinc-800" />
             </div>
           </div>
+
+          {/* Synthesize button — full width, high contrast */}
+          <button className="w-full mt-px py-6 bg-zinc-50 text-black text-xs tracking-[0.4em] uppercase font-medium hover:bg-white transition-colors duration-200">
+            Synthesize Fit
+          </button>
+
         </div>
       </section>
 
