@@ -14,7 +14,18 @@ const CARDS = [
   { id: 8, src: "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/card-8.jpg-3A32rfG06r7oTeRcY4LFU2S33RkBLz.avif", x: 84, y: 10, w: 240, depth: 0.40, rotate:  4 },
 ]
 
-const FITS = Array.from({ length: 8 }, (_, i) => ({ id: i + 1 }))
+const UNSPLASH_POOL = [
+  "https://images.unsplash.com/photo-1529139574466-a303027c1d8b?w=600&q=80",
+  "https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?w=600&q=80",
+  "https://images.unsplash.com/photo-1469334031218-e382a71b716b?w=600&q=80",
+  "https://images.unsplash.com/photo-1509631179647-0177331693ae?w=600&q=80",
+  "https://images.unsplash.com/photo-1539109136881-3be0616acf4b?w=600&q=80",
+  "https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=600&q=80",
+  "https://images.unsplash.com/photo-1483985988355-763728e1935b?w=600&q=80",
+  "https://images.unsplash.com/photo-1496747611176-843222e1e57c?w=600&q=80",
+]
+
+type FitEntry = { id: string; src: string; ts: number }
 
 function lerp(a: number, b: number, t: number) {
   return a + (b - a) * t
@@ -24,6 +35,7 @@ export default function PortePage() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [hoveredCard, setHoveredCard] = useState<number | null>(null)
   const [mounted, setMounted] = useState(false)
+  const [recentFits, setRecentFits] = useState<FitEntry[]>([])
   const heroRef = useRef<HTMLDivElement>(null)
   const mouseRef = useRef({ x: 0, y: 0 })
   const posRef = useRef(CARDS.map(() => ({ x: 0, y: 0 })))
@@ -31,6 +43,20 @@ export default function PortePage() {
 
   useEffect(() => {
     setMounted(true)
+    try {
+      const stored = localStorage.getItem("porte_history")
+      if (stored) setRecentFits(JSON.parse(stored))
+    } catch {}
+  }, [])
+
+  const addTestFit = useCallback(() => {
+    const src = UNSPLASH_POOL[Math.floor(Math.random() * UNSPLASH_POOL.length)]
+    const entry: FitEntry = { id: crypto.randomUUID(), src, ts: Date.now() }
+    setRecentFits((prev) => {
+      const next = [entry, ...prev]
+      localStorage.setItem("porte_history", JSON.stringify(next))
+      return next
+    })
   }, [])
 
   const scrollTo = useCallback((id: string) => {
@@ -249,55 +275,132 @@ export default function PortePage() {
             </div>
           </div>
 
-          {/* Synthesize button — full width, high contrast */}
-          <button className="w-full mt-px py-6 bg-zinc-50 text-black text-xs tracking-[0.4em] uppercase font-medium hover:bg-white transition-colors duration-200">
-            Synthesize Fit
-          </button>
+          {/* Action row */}
+          <div className="flex gap-px mt-px">
+            <button className="flex-1 py-6 bg-zinc-50 text-black text-xs tracking-[0.4em] uppercase font-medium hover:bg-white transition-colors duration-200">
+              Synthesize Fit
+            </button>
+            <button
+              onClick={addTestFit}
+              className="px-8 py-6 bg-zinc-900 text-zinc-400 text-xs tracking-[0.25em] uppercase font-mono hover:bg-zinc-800 hover:text-zinc-200 transition-colors duration-200 border-l border-zinc-800"
+            >
+              Test Storage
+            </button>
+          </div>
 
         </div>
       </section>
 
-      {/* Recent Fits */}
-      <section
-        id="fits"
-        className="py-24 px-6 lg:px-8 border-t border-zinc-800"
-        style={{ backgroundColor: "#000" }}
-      >
-        <div className="max-w-7xl mx-auto">
-          <div className="flex items-end justify-between mb-12">
-            <div>
-              <span className="text-xs text-zinc-600 tracking-widest uppercase mb-4 block">03</span>
-              <h2 className="font-serif text-5xl sm:text-6xl lg:text-7xl tracking-tighter">Recent Fits</h2>
-            </div>
-            <div className="hidden sm:flex items-center gap-2">
-              <button className="w-10 h-10 border border-zinc-800 flex items-center justify-center hover:bg-zinc-900 transition-colors">
-                <ChevronLeft className="w-4 h-4" />
-              </button>
-              <button className="w-10 h-10 border border-zinc-800 flex items-center justify-center hover:bg-zinc-900 transition-colors">
-                <ChevronRight className="w-4 h-4" />
-              </button>
-            </div>
+      {recentFits.length > 0 && (
+        <section
+          id="fits"
+          className="border-t border-zinc-900"
+          style={{ backgroundColor: "#000" }}
+        >
+          <div className="px-6 lg:px-16 pt-28 pb-14">
+            <span className="text-[9px] text-zinc-700 tracking-[0.45em] uppercase block mb-6">03 — Archive</span>
+            <h2 className="font-serif text-6xl sm:text-7xl lg:text-8xl tracking-tighter leading-none">Recent Fits</h2>
           </div>
 
-          <div className="flex gap-4 overflow-x-auto pb-4" style={{ scrollbarWidth: "none" }}>
-            {FITS.map((fit) => (
-              <div key={fit.id} className="shrink-0 w-40 cursor-pointer group">
-                <div className="aspect-[3/4] bg-zinc-900 border border-zinc-800 mb-2 group-hover:border-zinc-600 transition-colors" />
-                <p className="text-xs text-zinc-600 font-mono">FIT_{String(fit.id).padStart(3, "0")}</p>
-              </div>
-            ))}
+          <div
+            className="flex overflow-x-auto"
+            style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
+          >
+            {recentFits.map((fit, i) => {
+              const sysId = `VTON-${fit.id.slice(0, 6).toUpperCase()}`
+              const latency = ((fit.ts % 30) / 10 + 1.8).toFixed(1)
+              const synth = ["IDM", "DIFFUSION", "HYBRID", "FLOW", "NEURAL", "GAN", "VTON", "BLEND"][i % 8]
+              return (
+                <div key={fit.id} className="shrink-0 group cursor-pointer" style={{ width: "clamp(200px, 22vw, 320px)" }}>
+                  <div
+                    className="relative w-full bg-zinc-950 overflow-hidden border-r border-zinc-900"
+                    style={{ aspectRatio: "2/3" }}
+                  >
+                    <img
+                      src={fit.src}
+                      alt=""
+                      className="w-full h-full object-cover opacity-60 group-hover:opacity-90 transition-opacity duration-500"
+                    />
+                    <span className="absolute top-3 right-4 text-[8px] text-zinc-600 font-mono tracking-widest">
+                      {String(i + 1).padStart(2, "0")}
+                    </span>
+                  </div>
+                  <div className="px-3 pt-3 pb-8 border-r border-zinc-900">
+                    <p className="text-[8px] text-zinc-500 font-mono tracking-[0.15em] uppercase leading-relaxed">
+                      SYS.ID: {sysId}
+                    </p>
+                    <p className="text-[8px] text-zinc-600 font-mono tracking-[0.15em] uppercase leading-relaxed">
+                      LATENCY: {latency}s // SYNTH: {synth}
+                    </p>
+                  </div>
+                </div>
+              )
+            })}
           </div>
-        </div>
-      </section>
+        </section>
+      )}
 
       {/* Footer */}
       <footer
-        className="py-12 px-6 lg:px-8 border-t border-zinc-800"
+        className="border-t border-zinc-900 px-6 lg:px-16 py-14"
         style={{ backgroundColor: "#000" }}
       >
-        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
-          <span className="font-serif text-lg tracking-tighter">PORTE</span>
-          <p className="text-xs text-zinc-700">{"© 2026 Porte. All rights reserved."}</p>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-12 md:gap-0 items-start">
+
+          {/* Logo */}
+          <div className="col-span-2 md:col-span-1">
+            <span className="font-serif text-2xl tracking-tighter text-zinc-200">PORTE</span>
+            <p className="text-[9px] text-zinc-700 font-mono tracking-[0.2em] uppercase mt-3 leading-loose">
+              v2.4.1-stable<br />
+              {"© 2026"}
+            </p>
+          </div>
+
+          {/* Tech specs */}
+          <div className="flex flex-col gap-3">
+            <span className="text-[8px] text-zinc-800 font-mono tracking-[0.35em] uppercase mb-1">System</span>
+            <p className="text-[9px] text-zinc-600 font-mono tracking-[0.2em] uppercase leading-loose">
+              ENGINE: IDM-VTON<br />
+              MODEL: NEURAL SYNTHESIS<br />
+              RUNTIME: EDGE / SERVERLESS
+            </p>
+          </div>
+
+          {/* Status */}
+          <div className="flex flex-col gap-3">
+            <span className="text-[8px] text-zinc-800 font-mono tracking-[0.35em] uppercase mb-1">Status</span>
+            <p className="text-[9px] text-zinc-600 font-mono tracking-[0.2em] uppercase leading-loose">
+              PIPELINE: ACTIVE<br />
+              LATENCY: &lt; 4.0s<br />
+              STATUS: OPTIMAL
+            </p>
+          </div>
+
+          {/* Links */}
+          <div className="flex flex-col gap-3">
+            <span className="text-[8px] text-zinc-800 font-mono tracking-[0.35em] uppercase mb-1">Index</span>
+            <div className="flex flex-col gap-2">
+              {["Engine", "Fits", "Contact"].map((link) => (
+                <span
+                  key={link}
+                  className="text-[9px] text-zinc-600 font-mono tracking-[0.2em] uppercase hover:text-zinc-400 transition-colors cursor-pointer"
+                >
+                  {link}
+                </span>
+              ))}
+            </div>
+          </div>
+
+        </div>
+
+        {/* Bottom rule */}
+        <div className="mt-14 pt-6 border-t border-zinc-900 flex items-center justify-between">
+          <p className="text-[8px] text-zinc-800 font-mono tracking-[0.3em] uppercase">
+            PORTE SYSTEMS — CONFIDENTIAL PROTOTYPE
+          </p>
+          <p className="text-[8px] text-zinc-800 font-mono tracking-[0.3em] uppercase">
+            ALL RIGHTS RESERVED
+          </p>
         </div>
       </footer>
     </main>
