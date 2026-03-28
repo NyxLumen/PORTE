@@ -108,10 +108,12 @@ export default function PortePage() {
 	// --- FILE UPLOADS, API STATE & RESULTS ---
 	const [personFile, setPersonFile] = useState<File | null>(null);
 	const [personPreview, setPersonPreview] = useState<string | null>(null);
+	const [garmentUrl, setGarmentUrl] = useState("");
 	const [garmentFile, setGarmentFile] = useState<File | null>(null);
 	const [garmentPreview, setGarmentPreview] = useState<string | null>(null);
 	const [isSynthesizing, setIsSynthesizing] = useState(false);
 	const [resultImage, setResultImage] = useState<string | null>(null);
+	const [isScraping, setIsScraping] = useState(false);
 
 	const personInputRef = useRef<HTMLInputElement>(null);
 	const garmentInputRef = useRef<HTMLInputElement>(null);
@@ -187,21 +189,66 @@ export default function PortePage() {
 		setResultImage(src);
 	}, []);
 
+	const handleUrlScrape = async (url: string) => {
+		if (!url) return;
+		setIsScraping(true);
+
+		try {
+			const response = await fetch("http://127.0.0.1:8000/api/scrape-images", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ product_url: url }),
+			});
+
+			if (!response.ok) throw new Error("Scraper blocked or failed");
+
+			const data = await response.json();
+
+			if (data.images && data.images.length > 0) {
+				const scrapedImageUrl = data.images[0];
+
+				// Magically load the scraped image into the mirror
+				setGarmentPreview(scrapedImageUrl);
+				// Save the direct .jpg URL to send to LightX
+				setGarmentUrl(scrapedImageUrl);
+				// Wipe any previously uploaded files
+				setGarmentFile(null);
+			} else {
+				throw new Error("No images found");
+			}
+		} catch (error) {
+			console.error(error);
+			alert(
+				"Scraper blocked by the retailer. Fallback: Upload a screenshot of the garment instead.",
+			);
+		} finally {
+			setIsScraping(false);
+		}
+	};
 	// --- THE CORE AI PIPELINE ---
 	const triggerSynthesis = async () => {
-		if (!personFile || !garmentFile) {
-			alert("Please upload both your silhouette and the garment.");
+		// Check if they provided the silhouette AND at least one garment source
+		if (!personFile || (!garmentFile && !garmentUrl)) {
+			alert(
+				"Please upload your silhouette and provide a garment (either upload or URL).",
+			);
 			return;
 		}
 
 		setIsSynthesizing(true);
 		const controller = new AbortController();
-		const timeoutId = setTimeout(() => controller.abort(), 45000); // 45-second processing window
+		const timeoutId = setTimeout(() => controller.abort(), 45000);
 
 		try {
 			const formData = new FormData();
 			formData.append("person_image", personFile);
-			formData.append("garment_image", garmentFile);
+
+			// Send whichever garment source the user provided
+			if (garmentFile) {
+				formData.append("garment_image", garmentFile);
+			} else if (garmentUrl) {
+				formData.append("garment_url", garmentUrl);
+			}
 
 			const response = await fetch("http://127.0.0.1:8000/api/try-on-upload", {
 				method: "POST",
@@ -214,11 +261,9 @@ export default function PortePage() {
 
 			const data = await response.json();
 
-			// Show the massive reveal mirror
 			setResultImage(data.result_image_url);
 
-			// Save to history strip
-			const entry: FitEntry = {
+			const entry = {
 				id: crypto.randomUUID(),
 				src: data.result_image_url,
 				ts: Date.now(),
@@ -235,7 +280,7 @@ export default function PortePage() {
 
 			setResultImage(fallbackImage);
 
-			const entry: FitEntry = {
+			const entry = {
 				id: crypto.randomUUID(),
 				src: fallbackImage,
 				ts: Date.now(),
@@ -526,51 +571,82 @@ export default function PortePage() {
 									<div className="absolute bottom-3 right-3 w-3 h-3 border-b border-r border-zinc-800 z-10" />
 								</div>
 
-								{/* Right Mirror */}
+								{/* Right Mirror (Dual Input + Scraper) */}
 								<div
-									className="relative flex flex-col bg-black cursor-pointer group overflow-hidden"
+									className="relative flex flex-col bg-black overflow-hidden"
 									style={{ aspectRatio: "3/4" }}
-									onClick={() => garmentInputRef.current?.click()}
 								>
-									<input
-										type="file"
-										accept="image/*"
-										className="hidden"
-										ref={garmentInputRef}
-										onChange={handleGarmentUpload}
-									/>
 									<div className="absolute inset-0 border border-zinc-800 pointer-events-none z-10" />
 
-									{garmentPreview ? (
-										<img
-											src={garmentPreview}
-											alt="Garment"
-											className="absolute inset-0 w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity"
-										/>
-									) : (
-										<div className="flex-1 flex flex-col items-center justify-center gap-5 relative z-10">
-											<div className="w-11 h-11 border border-zinc-800 flex items-center justify-center group-hover:border-zinc-600 transition-colors duration-300">
-												<Plus
-													className="w-4 h-4 text-zinc-600 group-hover:text-zinc-400 transition-colors duration-300"
-													strokeWidth={1}
-												/>
-											</div>
-											<span className="text-[10px] text-zinc-600 tracking-[0.3em] uppercase group-hover:text-zinc-500 transition-colors duration-300">
-												Upload Garment
+									{/* Sleek URL Input Bar */}
+									<div className="relative z-20 border-b border-zinc-800 bg-black/80 backdrop-blur-md px-6 py-4 flex items-center justify-between">
+										<div className="flex-1 pr-4">
+											<span className="text-[9px] text-zinc-500 tracking-[0.35em] uppercase block mb-1">
+												Store Link (Myntra/Ajio)
 											</span>
+											<input
+												type="url"
+												placeholder="— paste link & hit enter"
+												onKeyDown={(e) => {
+													if (e.key === "Enter") {
+														e.preventDefault();
+														handleUrlScrape(e.currentTarget.value);
+													}
+												}}
+												className="w-full bg-transparent text-zinc-200 text-xs tracking-[0.1em] placeholder:text-zinc-700 outline-none font-light"
+											/>
 										</div>
-									)}
-
-									<div className="absolute top-6 left-6 z-10 bg-black/50 backdrop-blur-sm px-3 py-1.5 border border-zinc-800/50">
-										<span className="text-[9px] text-zinc-300 tracking-[0.35em] uppercase">
-											The Garment
-										</span>
+										{isScraping && (
+											<span className="text-[8px] text-zinc-400 tracking-[0.3em] uppercase animate-pulse shrink-0">
+												Scraping...
+											</span>
+										)}
 									</div>
 
-									<div className="absolute top-3 left-3 w-3 h-3 border-t border-l border-zinc-800 z-10" />
-									<div className="absolute top-3 right-3 w-3 h-3 border-t border-r border-zinc-800 z-10" />
-									<div className="absolute bottom-3 left-3 w-3 h-3 border-b border-l border-zinc-800 z-10" />
-									<div className="absolute bottom-3 right-3 w-3 h-3 border-b border-r border-zinc-800 z-10" />
+									{/* Upload Dropzone / Scraped Image Display */}
+									<div
+										className="relative flex-1 flex flex-col cursor-pointer group"
+										onClick={() => garmentInputRef.current?.click()}
+									>
+										<input
+											type="file"
+											accept="image/*"
+											className="hidden"
+											ref={garmentInputRef}
+											onChange={(e) => {
+												handleGarmentUpload(e);
+												if (e.target.files && e.target.files[0]) {
+													setGarmentUrl(""); // Clear URL if they manually upload a file
+												}
+											}}
+										/>
+
+										{garmentPreview ? (
+											<img
+												src={garmentPreview}
+												alt="Garment"
+												className="absolute inset-0 w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity"
+											/>
+										) : (
+											<div className="flex-1 flex flex-col items-center justify-center gap-5 relative z-10">
+												<div className="w-11 h-11 border border-zinc-800 flex items-center justify-center group-hover:border-zinc-600 transition-colors duration-300">
+													<Plus
+														className="w-4 h-4 text-zinc-600 group-hover:text-zinc-400 transition-colors duration-300"
+														strokeWidth={1}
+													/>
+												</div>
+												<span className="text-[10px] text-zinc-600 tracking-[0.3em] uppercase group-hover:text-zinc-500 transition-colors duration-300">
+													Or Upload File
+												</span>
+											</div>
+										)}
+									</div>
+
+									{/* Corner markers */}
+									<div className="absolute top-3 left-3 w-3 h-3 border-t border-l border-zinc-800 z-30 pointer-events-none" />
+									<div className="absolute top-3 right-3 w-3 h-3 border-t border-r border-zinc-800 z-30 pointer-events-none" />
+									<div className="absolute bottom-3 left-3 w-3 h-3 border-b border-l border-zinc-800 z-30 pointer-events-none" />
+									<div className="absolute bottom-3 right-3 w-3 h-3 border-b border-r border-zinc-800 z-30 pointer-events-none" />
 								</div>
 							</div>
 
