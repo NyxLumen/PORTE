@@ -120,24 +120,36 @@ async def generate_tryon(request: TryOnRequest):
         # Send 503 so Adi's frontend shows the mock/pre-generated image
         raise HTTPException(status_code=503, detail="AI_ENGINE_OFFLINE")
 
+from fastapi import File, Form, UploadFile
+from typing import Optional
+
 @app.post("/api/try-on-upload")
 async def generate_tryon_upload(
     person_image: UploadFile = File(...), 
-    garment_image: UploadFile = File(...)
+    garment_image: Optional[UploadFile] = File(None),
+    garment_url: Optional[str] = Form(None)
 ):
     try:
-        # Read files into memory
+        # 1. Handle Person Image (Always uploaded in this endpoint)
         person_bytes = await person_image.read()
-        garment_bytes = await garment_image.read()
-        
-        # Upload to get public URLs
         person_url = upload_to_tmpfiles(person_bytes)
-        garment_url = upload_to_tmpfiles(garment_bytes)
         
-        print(f"🔗 Uploaded URLs:\nPerson: {person_url}\nGarment: {garment_url}")
+        # 2. Handle Garment Image (Either File or direct URL)
+        final_garment_url = ""
+        if garment_url:
+            # User provided a scraped/direct URL
+            final_garment_url = garment_url
+        elif garment_image:
+            # User manually uploaded a garment photo
+            garment_bytes = await garment_image.read()
+            final_garment_url = upload_to_tmpfiles(garment_bytes)
+        else:
+            raise Exception("Please provide either garment_image (file) or garment_url (text).")
+            
+        print(f"🔗 Final URLs for Try-On:\nPerson: {person_url}\nGarment: {final_garment_url}")
         
         # Now use the existing TryOn logic
-        request_obj = TryOnRequest(user_image_url=person_url, garment_image_url=garment_url)
+        request_obj = TryOnRequest(user_image_url=person_url, garment_image_url=final_garment_url)
         return await generate_tryon(request_obj)
         
     except Exception as e:
@@ -153,11 +165,23 @@ class ScrapeRequest(BaseModel):
 @app.post("/api/scrape-images")
 async def scrape_product_images(request: ScrapeRequest):
     """Scrape garment images from a product URL (Myntra, Ajio, etc.)."""
-    from scraper import scrape_garment_images
+    from scraper import scrape_garment_images, _detect_site
 
+    site = _detect_site(request.product_url)
+    
     try:
         images = await scrape_garment_images(request.product_url)
         if not images:
+            # Give network-specific advice
+            if site in ("ajio", "shein"):
+                raise HTTPException(
+                    status_code=404,
+                    detail=(
+                        f"Could not fetch images from {site.title()}. "
+                        "This site blocks requests from certain networks "
+                        "(e.g. mobile hotspots). Try switching to a broadband/WiFi connection."
+                    )
+                )
             raise HTTPException(
                 status_code=404,
                 detail="No garment images found. The site may be blocking scrapers."

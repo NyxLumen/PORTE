@@ -6,15 +6,44 @@ Strategy:
   1. First try a fast `requests` + regex approach to extract image URLs
      from the page source / embedded JSON (works for Myntra, Ajio, etc.)
   2. If that fails, fall back to Playwright (headless browser) for JS-heavy sites.
+
+Network notes:
+  - Ajio (Akamai WAF): Uses Safari iOS TLS fingerprint via curl_cffi to
+    bypass bot detection. Chrome fingerprints are blocked on Indian mobile IPs.
+  - Shein: Geoblocked from India at the IP level. Requires a proxy (set
+    SCRAPER_PROXY in .env) or a non-Indian network to function.
 """
 
 import asyncio
 import json
+import os
 import re
+import time
 from urllib.parse import urlparse
 from typing import Optional
 
 import requests as http_requests
+
+
+# ---------------------------------------------------------------------------
+# Proxy & network config (loaded from environment)
+# ---------------------------------------------------------------------------
+# Set SCRAPER_PROXY in .env to route Ajio/Shein through a proxy.
+# Example: SCRAPER_PROXY=http://user:pass@proxy.example.com:8080
+#          SCRAPER_PROXY=socks5://user:pass@proxy.example.com:1080
+
+def _get_proxy() -> Optional[str]:
+    """Get proxy URL from environment if configured."""
+    proxy = os.environ.get("SCRAPER_PROXY", "").strip()
+    return proxy if proxy else None
+
+
+def _proxy_dict() -> Optional[dict]:
+    """Return proxy dict for curl_cffi / requests, or None."""
+    proxy = _get_proxy()
+    if proxy:
+        return {"http": proxy, "https": proxy}
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -157,7 +186,8 @@ def _scrape_myntra_fast(url: str) -> list[str]:
             )
             images = cdn_pattern.findall(html)
 
-        return _filter_unique(images)
+        unique_images = _filter_unique(images)
+        return [unique_images[0]] if unique_images else []
 
     except Exception as e:
         print(f"[SCRAPER] Fast Myntra extraction failed: {e}")
@@ -170,7 +200,20 @@ def _extract_ajio_product_code(url: str) -> str | None:
     return match.group(1) if match else None
 
 
-AJIO_API_HEADERS = {
+# Safari iOS headers — Akamai on Ajio whitelists Safari TLS fingerprints
+# while aggressively blocking Chrome fingerprints from Indian mobile IPs.
+AJIO_API_HEADERS_SAFARI = {
+    "User-Agent": (
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
+        "AppleWebKit/605.1.15 (KHTML, like Gecko) "
+        "Version/17.0 Mobile/15E148 Safari/604.1"
+    ),
+    "Accept": "application/json",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://www.ajio.com/",
+}
+
+AJIO_API_HEADERS_CHROME = {
     "User-Agent": (
         "Mozilla/5.0 (Linux; Android 13) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -181,9 +224,88 @@ AJIO_API_HEADERS = {
     "Referer": "https://www.ajio.com/",
 }
 
+# Ordered by success rate on Indian mobile networks
+_AJIO_PROFILES = [
+    ("safari17_0",    AJIO_API_HEADERS_SAFARI),
+    ("safari17_2_ios", AJIO_API_HEADERS_SAFARI),
+    ("safari15_5",    AJIO_API_HEADERS_SAFARI),
+    ("chrome120",     AJIO_API_HEADERS_CHROME),
+    ("chrome110",     AJIO_API_HEADERS_CHROME),
+]
+
+
+def _parse_ajio_images(data: dict) -> list[str]:
+    """Extract image URLs from Ajio API JSON response."""
+    images: list[str] = []
+
+    # The API returns an "images" array with format types:
+    # "superZoomPdp" (1117x1400), "product" (473x593), "thumbnail" (78x98)
+    api_images = data.get("images", [])
+    for img in api_images:
+        if isinstance(img, dict):
+            fmt = img.get("format", "")
+            img_url = img.get("url", "")
+            if fmt == "superZoomPdp" and img_url:
+                cleaned = _clean_url(img_url)
+                if cleaned:
+                    images.append(cleaned)
+
+    # Fallback to product format
+    if not images:
+        for img in api_images:
+            if isinstance(img, dict):
+                fmt = img.get("format", "")
+                img_url = img.get("url", "")
+                if fmt == "product" and img_url:
+                    cleaned = _clean_url(img_url)
+                    if cleaned:
+                        images.append(cleaned)
+
+    # Also check modelImage from baseOptions
+    if not images:
+        base_options = data.get("baseOptions", [])
+        for opt in base_options:
+            selected = opt.get("selected", {})
+            model_img = selected.get("modelImage", {})
+            img_url = model_img.get("url", "")
+            if img_url:
+                cleaned = _clean_url(img_url)
+                if cleaned:
+                    images.append(cleaned)
+
+    # Fallback: look for any key containing image URLs in the response
+    if not images:
+        _find_image_urls_recursive(data, images, depth=0)
+
+    return images
+
+
+def _find_image_urls_recursive(obj, results: list, depth: int = 0):
+    """Recursively search a JSON object for image URLs."""
+    if depth > 6 or len(results) > 20:
+        return
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if isinstance(v, str) and v.startswith("http") and any(
+                ext in v.lower() for ext in [".jpg", ".jpeg", ".png", ".webp"]
+            ):
+                cleaned = _clean_url(v)
+                if cleaned:
+                    results.append(cleaned)
+            elif isinstance(v, (dict, list)):
+                _find_image_urls_recursive(v, results, depth + 1)
+    elif isinstance(obj, list):
+        for item in obj:
+            _find_image_urls_recursive(item, results, depth + 1)
+
 
 def _scrape_ajio_fast(url: str) -> list[str]:
-    """Extract Ajio images via internal product API using curl_cffi."""
+    """Extract Ajio images via internal product API using curl_cffi.
+
+    Tries multiple TLS impersonation profiles (Safari first, then Chrome)
+    because Akamai blocks Chrome fingerprints from Indian mobile IPs.
+    Falls back to a configured proxy if all direct attempts fail.
+    """
     print("[SCRAPER] Trying Ajio extraction via internal product API...")
     try:
         from curl_cffi import requests as cffi_requests
@@ -198,63 +320,49 @@ def _scrape_ajio_fast(url: str) -> list[str]:
 
     api_url = f"https://www.ajio.com/api/p/{product_code}"
     print(f"[SCRAPER] Ajio API: {api_url}")
+    proxies = _proxy_dict()
 
-    try:
-        resp = cffi_requests.get(
-            api_url,
-            headers=AJIO_API_HEADERS,
-            timeout=15,
-            impersonate="chrome110",
-        )
-        if resp.status_code != 200:
-            print(f"[SCRAPER] Ajio API returned status {resp.status_code}")
-            return []
+    # Try each impersonation profile
+    for profile_name, headers in _AJIO_PROFILES:
+        try:
+            kwargs = {
+                "headers": headers,
+                "timeout": 15,
+                "impersonate": profile_name,
+            }
+            if proxies:
+                kwargs["proxies"] = proxies
 
-        data = resp.json()
-        images: list[str] = []
+            print(f"[SCRAPER]   Trying profile: {profile_name}" + (" (via proxy)" if proxies else ""))
+            resp = cffi_requests.get(api_url, **kwargs)
 
-        # The API returns an "images" array with format types:
-        # "superZoomPdp" (1117x1400), "product" (473x593), "thumbnail" (78x98)
-        # We want only the highest resolution: superZoomPdp
-        api_images = data.get("images", [])
-        for img in api_images:
-            if isinstance(img, dict):
-                fmt = img.get("format", "")
-                img_url = img.get("url", "")
-                # Prefer superZoomPdp (highest res), then product
-                if fmt == "superZoomPdp" and img_url:
-                    cleaned = _clean_url(img_url)
-                    if cleaned:
-                        images.append(cleaned)
+            if resp.status_code == 200:
+                try:
+                    data = resp.json()
+                    images = _parse_ajio_images(data)
+                    if images:
+                        print(f"[SCRAPER]   Success with {profile_name}: {len(images)} image(s)")
+                        return _filter_unique(images)
+                    else:
+                        print(f"[SCRAPER]   {profile_name} returned 200 but no images in response")
+                except (json.JSONDecodeError, ValueError):
+                    print(f"[SCRAPER]   {profile_name} returned 200 but non-JSON body")
+            else:
+                print(f"[SCRAPER]   {profile_name} returned status {resp.status_code}")
 
-        # If no superZoom, fallback to product format
-        if not images:
-            for img in api_images:
-                if isinstance(img, dict):
-                    fmt = img.get("format", "")
-                    img_url = img.get("url", "")
-                    if fmt == "product" and img_url:
-                        cleaned = _clean_url(img_url)
-                        if cleaned:
-                            images.append(cleaned)
+        except Exception as e:
+            err = str(e)[:80]
+            print(f"[SCRAPER]   {profile_name} failed: {err}")
 
-        # Also check modelImage from baseOptions
-        if not images:
-            base_options = data.get("baseOptions", [])
-            for opt in base_options:
-                selected = opt.get("selected", {})
-                model_img = selected.get("modelImage", {})
-                img_url = model_img.get("url", "")
-                if img_url:
-                    cleaned = _clean_url(img_url)
-                    if cleaned:
-                        images.append(cleaned)
+    # If all profiles failed without proxy, try again with proxy if available
+    if not proxies:
+        proxy_url = _get_proxy()
+        if not proxy_url:
+            print("[SCRAPER] All Ajio profiles failed. Set SCRAPER_PROXY in .env for proxy bypass.")
+    else:
+        print("[SCRAPER] All Ajio profiles failed even with proxy.")
 
-        return _filter_unique(images)
-
-    except Exception as e:
-        print(f"[SCRAPER] Ajio API extraction failed: {e}")
-        return []
+    return []
 
 
 def _scrape_amazon_fast(url: str) -> list[str]:
@@ -360,8 +468,87 @@ def _normalize_shein_url(url: str) -> str:
     return url
 
 
+_SHEIN_PROFILES = [
+    "chrome120",
+    "safari17_0",
+    "chrome110",
+    "safari15_5",
+]
+
+
+def _parse_shein_html(html: str) -> list[str]:
+    """Parse Shein HTML for product images."""
+    images: list[str] = []
+
+    # Strategy 1: window.__INITIAL_STATE__ JSON
+    state_match = re.search(r'window\.__INITIAL_STATE__\s*=\s*(\{.+?\});\s*</', html, re.DOTALL)
+    if state_match:
+        try:
+            data = json.loads(state_match.group(1))
+            product_intro = data.get("productIntro", {})
+            goods_mirror = product_intro.get("goodsMirror", {})
+            goods_imgs = goods_mirror.get("goods_imgs", {})
+
+            for img_key, img_data in goods_imgs.items():
+                if isinstance(img_data, list):
+                    for item in img_data:
+                        if isinstance(item, dict):
+                            img_url = item.get("origin_image") or item.get("image_url") or item.get("thumbnail")
+                            if img_url:
+                                cleaned = _clean_url(img_url)
+                                if cleaned:
+                                    images.append(cleaned)
+                        elif isinstance(item, str):
+                            cleaned = _clean_url(item)
+                            if cleaned:
+                                images.append(cleaned)
+                elif isinstance(img_data, str):
+                    cleaned = _clean_url(img_data)
+                    if cleaned:
+                        images.append(cleaned)
+        except (json.JSONDecodeError, Exception) as e:
+            print(f"[SCRAPER] Could not parse Shein __INITIAL_STATE__: {e}")
+
+    # Strategy 1b: Try recursive search on __INITIAL_STATE__ if structured extraction failed
+    if not images and state_match:
+        try:
+            data = json.loads(state_match.group(1))
+            _find_image_urls_recursive(data, images, depth=0)
+        except:
+            pass
+
+    # Strategy 2: application/ld+json structured data
+    if not images:
+        ld_matches = re.findall(r'<script[^>]*type="application/ld\+json"[^>]*>(.+?)</script>', html, re.DOTALL)
+        for ld_text in ld_matches:
+            try:
+                ld_data = json.loads(ld_text)
+                if isinstance(ld_data, dict):
+                    img = ld_data.get("image")
+                    if isinstance(img, str):
+                        images.append(img)
+                    elif isinstance(img, list):
+                        images.extend([u for u in img if isinstance(u, str)])
+            except json.JSONDecodeError:
+                continue
+
+    # Strategy 3: Regex for Shein CDN URLs (img.ltwebstatic.com)
+    if not images:
+        cdn_pattern = re.compile(
+            r'https?://img\.ltwebstatic\.com/[^\s"\'<>]+\.(?:jpg|jpeg|webp|png)',
+            re.IGNORECASE,
+        )
+        images = cdn_pattern.findall(html)
+
+    return images
+
+
 def _scrape_shein_fast(url: str) -> list[str]:
-    """Extract Shein product images using curl_cffi for anti-bot bypass."""
+    """Extract Shein product images using curl_cffi for anti-bot bypass.
+
+    Shein is fully geoblocked from Indian IPs (connection timeout).
+    A proxy (SCRAPER_PROXY env var) is required when on Indian networks.
+    """
     print("[SCRAPER] Trying Shein extraction with TLS fingerprint bypass...")
 
     # Normalize geoblocked shein.in to us.shein.com
@@ -373,78 +560,40 @@ def _scrape_shein_fast(url: str) -> list[str]:
         print("[SCRAPER] curl_cffi not installed. Run: pip install curl_cffi")
         return []
 
-    try:
-        resp = cffi_requests.get(
-            url,
-            headers=HEADERS,
-            timeout=20,
-            impersonate="chrome120",
-            allow_redirects=True,
-        )
-        if resp.status_code != 200:
-            print(f"[SCRAPER] Shein returned status {resp.status_code}")
-            return []
+    proxies = _proxy_dict()
+    if not proxies:
+        print("[SCRAPER] WARNING: No SCRAPER_PROXY set. Shein is geoblocked from Indian IPs — set SCRAPER_PROXY in .env")
 
-        html = resp.text
-        images: list[str] = []
+    for profile in _SHEIN_PROFILES:
+        try:
+            kwargs = {
+                "headers": HEADERS,
+                "timeout": 20,
+                "impersonate": profile,
+                "allow_redirects": True,
+            }
+            if proxies:
+                kwargs["proxies"] = proxies
 
-        # Strategy 1: window.__INITIAL_STATE__ JSON
-        state_match = re.search(r'window\.__INITIAL_STATE__\s*=\s*(\{.+?\});\s*</', html, re.DOTALL)
-        if state_match:
-            try:
-                data = json.loads(state_match.group(1))
-                product_intro = data.get("productIntro", {})
-                goods_mirror = product_intro.get("goodsMirror", {})
-                goods_imgs = goods_mirror.get("goods_imgs", {})
+            print(f"[SCRAPER]   Trying Shein with {profile}" + (" (via proxy)" if proxies else ""))
+            resp = cffi_requests.get(url, **kwargs)
 
-                for img_key, img_data in goods_imgs.items():
-                    if isinstance(img_data, list):
-                        for item in img_data:
-                            if isinstance(item, dict):
-                                img_url = item.get("origin_image") or item.get("image_url") or item.get("thumbnail")
-                                if img_url:
-                                    cleaned = _clean_url(img_url)
-                                    if cleaned:
-                                        images.append(cleaned)
-                            elif isinstance(item, str):
-                                cleaned = _clean_url(item)
-                                if cleaned:
-                                    images.append(cleaned)
-                    elif isinstance(img_data, str):
-                        cleaned = _clean_url(img_data)
-                        if cleaned:
-                            images.append(cleaned)
-            except (json.JSONDecodeError, Exception) as e:
-                print(f"[SCRAPER] Could not parse Shein __INITIAL_STATE__: {e}")
+            if resp.status_code == 200:
+                images = _parse_shein_html(resp.text)
+                if images:
+                    print(f"[SCRAPER]   Success with {profile}: {len(images)} image(s)")
+                    return _filter_unique(images)
+                else:
+                    print(f"[SCRAPER]   {profile} returned 200 but no images found in HTML")
+            else:
+                print(f"[SCRAPER]   {profile} returned status {resp.status_code}")
 
-        # Strategy 2: application/ld+json structured data
-        if not images:
-            ld_matches = re.findall(r'<script[^>]*type="application/ld\+json"[^>]*>(.+?)</script>', html, re.DOTALL)
-            for ld_text in ld_matches:
-                try:
-                    ld_data = json.loads(ld_text)
-                    if isinstance(ld_data, dict):
-                        img = ld_data.get("image")
-                        if isinstance(img, str):
-                            images.append(img)
-                        elif isinstance(img, list):
-                            images.extend([u for u in img if isinstance(u, str)])
-                except json.JSONDecodeError:
-                    continue
+        except Exception as e:
+            err = str(e)[:80]
+            print(f"[SCRAPER]   {profile} failed: {err}")
 
-        # Strategy 3: Regex for Shein CDN URLs (img.ltwebstatic.com)
-        if not images:
-            cdn_pattern = re.compile(
-                r'https?://img\.ltwebstatic\.com/[^\s"\'<>]+\.(?:jpg|jpeg|webp|png)',
-                re.IGNORECASE,
-            )
-            images = cdn_pattern.findall(html)
-
-        return _filter_unique(images)
-
-    except Exception as e:
-        print(f"[SCRAPER] Shein extraction failed: {e}")
-        return []
+    print("[SCRAPER] All Shein profiles failed. Ensure SCRAPER_PROXY is set for Indian networks.")
+    return []
 
 
 def _scrape_generic_fast(url: str) -> list[str]:
@@ -746,14 +895,27 @@ async def scrape_garment_images(product_url: str) -> list[str]:
 
 if __name__ == "__main__":
     import sys
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ImportError:
+        pass
 
     url = sys.argv[1] if len(sys.argv) > 1 else "https://www.myntra.com"
     
-    print(f"\n[TEST] Scraper test with: {url}\n")
+    # Redirect all debug prints to stderr so that stdout only contains the final raw URL
+    old_stdout = sys.stdout
+    sys.stdout = sys.stderr
+    
+    proxy = _get_proxy()
+    if not proxy:
+        print("[CONFIG] No SCRAPER_PROXY set (Ajio/Shein may fail on Indian networks)")
+    
     results = asyncio.run(scrape_garment_images(url))
+    
+    # Restore stdout
+    sys.stdout = old_stdout
+    
+    # Output JUST the first link on stdout, cleanly
     if results:
-        print(f"\n[RESULT] {len(results)} image(s) found:")
-        for i, img_url in enumerate(results, 1):
-            print(f"  {i}. {img_url}")
-    else:
-        print("\n[RESULT] No images found. The site may be blocking scrapers.")
+        print(results[0])
