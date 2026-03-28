@@ -143,3 +143,28 @@ async def generate_tryon_upload(
     except Exception as e:
         print(f"❌ Upload API Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# --- GARMENT IMAGE SCRAPER ---
+
+class ScrapeRequest(BaseModel):
+    product_url: str
+
+@app.post("/api/scrape-images")
+async def scrape_product_images(request: ScrapeRequest):
+    """Scrape garment images from a product URL (Myntra, Ajio, etc.)."""
+    from scraper import scrape_garment_images
+
+    try:
+        images = await scrape_garment_images(request.product_url)
+        if not images:
+            raise HTTPException(
+                status_code=404,
+                detail="No garment images found. The site may be blocking scrapers."
+            )
+        return {"status": "success", "images": images, "count": len(images)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Scraper Error: {e}")
+        raise HTTPException(status_code=500, detail=f"Scraper failed: {str(e)}")
