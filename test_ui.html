@@ -206,8 +206,13 @@
             </div>
 
             <div class="input-group">
-                <label>Garment Photo</label>
-                <input type="file" id="garmentFile" accept="image/*" onchange="updateFilePreview('garmentFile', 'garmentPreview', 'garmentPlaceholder')">
+                <label>Garment Photo (Link OR File)</label>
+                <div style="display: flex; gap: 0.5rem; margin-bottom: 0.25rem;">
+                    <input type="text" id="garmentUrlInput" placeholder="Paste Myntra/Ajio link..." style="flex: 1;">
+                    <button class="btn-sample" onclick="fetchGarmentImage()" id="fetchBtn" style="padding: 0.5rem 1rem; font-size: 0.9rem;">Fetch</button>
+                </div>
+                <div style="text-align: center; color: #64748b; font-size: 0.8rem; margin-bottom: 0.25rem;">OR UPLOAD MANUALLY</div>
+                <input type="file" id="garmentFile" accept="image/*" onchange="updateFilePreview('garmentFile', 'garmentPreview', 'garmentPlaceholder', true)">
                 <div class="image-preview" id="garmentPreviewBox">
                     <span id="garmentPlaceholder">Garment Preview</span>
                     <img id="garmentPreview" alt="Garment">
@@ -232,10 +237,18 @@
     </div>
 
     <script>
-        function updateFilePreview(inputId, imgId, placeholderId) {
+        let scrapedGarmentUrl = null;
+
+        function updateFilePreview(inputId, imgId, placeholderId, isManualUpload = false) {
             const fileInput = document.getElementById(inputId);
             const img = document.getElementById(imgId);
             const placeholder = document.getElementById(placeholderId);
+            
+            // clear scraped URL if a manual file is uploaded
+            if (isManualUpload && inputId === 'garmentFile') {
+                scrapedGarmentUrl = null;
+                document.getElementById('garmentUrlInput').value = '';
+            }
             
             if (fileInput.files && fileInput.files[0]) {
                 const reader = new FileReader();
@@ -245,10 +258,57 @@
                     placeholder.style.display = 'none';
                 }
                 reader.readAsDataURL(fileInput.files[0]);
-            } else {
+            } else if (!scrapedGarmentUrl) {
                 img.src = '';
                 img.style.display = 'none';
                 placeholder.style.display = 'block';
+            }
+        }
+
+        async function fetchGarmentImage() {
+            const urlInput = document.getElementById('garmentUrlInput').value.trim();
+            const fetchBtn = document.getElementById('fetchBtn');
+            const errorMsg = document.getElementById('errorMsg');
+            
+            if (!urlInput) return;
+            
+            fetchBtn.disabled = true;
+            fetchBtn.innerText = "⏳...";
+            errorMsg.style.display = 'none';
+            
+            // Clear manual file upload if fetching link
+            document.getElementById('garmentFile').value = '';
+            scrapedGarmentUrl = null;
+            
+            try {
+                const response = await fetch("http://localhost:8000/api/scrape-images", {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({ product_url: urlInput })
+                });
+                const data = await response.json();
+                
+                if (!response.ok) throw new Error(data.detail || "Failed to scrape");
+                if (data.status !== "success" || !data.images || data.images.length === 0) {
+                    throw new Error("No images found for this link.");
+                }
+                
+                scrapedGarmentUrl = data.images[0];
+                
+                const img = document.getElementById('garmentPreview');
+                const placeholder = document.getElementById('garmentPlaceholder');
+                img.src = scrapedGarmentUrl;
+                img.style.display = 'block';
+                placeholder.style.display = 'none';
+                
+            } catch(e) {
+                errorMsg.innerText = "❌ Scraper Error: " + e.message;
+                errorMsg.style.display = 'block';
+                document.getElementById('garmentPreview').style.display = 'none';
+                document.getElementById('garmentPlaceholder').style.display = 'block';
+            } finally {
+                fetchBtn.disabled = false;
+                fetchBtn.innerText = "Fetch";
             }
         }
 
@@ -261,8 +321,8 @@
             const loader = document.getElementById('loader');
             const tryBtn = document.getElementById('tryBtn');
 
-            if (!personFile || !garmentFile) {
-                errorMsg.innerText = "Please select both a person photo and a garment photo!";
+            if (!personFile || (!garmentFile && !scrapedGarmentUrl)) {
+                errorMsg.innerText = "Please select a person photo, AND provide a garment photo (either uploaded or from a link)!";
                 errorMsg.style.display = 'block';
                 return;
             }
@@ -277,7 +337,12 @@
             try {
                 const formData = new FormData();
                 formData.append("person_image", personFile);
-                formData.append("garment_image", garmentFile);
+                if (garmentFile) {
+                    formData.append("garment_image", garmentFile);
+                }
+                if (scrapedGarmentUrl) {
+                    formData.append("garment_url", scrapedGarmentUrl);
+                }
 
                 const response = await fetch("http://localhost:8000/api/try-on-upload", {
                     method: "POST",
